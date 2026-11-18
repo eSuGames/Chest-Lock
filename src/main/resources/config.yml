@@ -1,0 +1,94 @@
+# ChestLock のチャットメッセージ設定
+# {player} = プレイヤー名、{owner} = 所有者名、{world}/{x}/{y}/{z} = 座標、{status} = 状態、{version} = バージョン
+# 空欄のメッセージは表示されません。
+
+# ===== ペナルティ設定（分単位）=====
+penalty:
+  # 試行のカウントがリセットされるまでの時間。この時間内に 2〜5 回の試行が積み上がります。
+  attempt-window-minutes: 10
+  # アラート（3 回目）が鳴った後、そのプレイヤーの新しいエスカレーションが開始されない時間（個人用チェスト）
+  alert-cooldown-minutes: 5
+  # 公共チェストの破壊試行でアラートが鳴った場合のクールダウン
+  public-alert-cooldown-minutes: 10
+  # PvP ペナルティの継続時間
+  pvp-duration-minutes: 5
+
+messages:
+  # --- メッセージ ---
+  # 銅チェーンで通常チェストをロック
+  lock-set: 'チェストをロックしました。あなただけが使用できます。'
+  # 鉄チェーンで通常チェストを公共用に設定
+  public-set: 'このチェストを誰でも使用できるように変更しました。あなただけが破壊できます。'
+  # ロックされたチェストを所有者以外が開ける
+  locked-no-use: 'このチェストはロックされています。'
+  # 公共用のチェストを破壊しようとする
+  public-no-break: 'このチェストは公共チェストなため破壊できません。破壊可能: {owner}(所有者)'
+  # 個人用チェストを所有者以外が破壊しようとする
+  private-no-break: 'このチェストはロックされているため破壊できません。'
+  # ラージチェストへの増結で設定を引き継いだ
+  large-inherit: 'チェストがラージチェストになったため、自動的に設定を引き継ぎました。'
+  # 共有ユーザーの追加に成功
+  share-added: '{player}がこのチェストを開けられるようになりました。'
+  # 存在しないユーザー / MCID の形式に合わない名前を追加しようとする
+  share-not-found: '{player}というユーザーはMinecraftに存在しません。'
+  # 既に共有済みのユーザーを追加しようとした
+  share-already: '{player}は既にこのチェストを使用できます。'
+  # 斧で個人用設定を解除した
+  unlock-success: 'チェストのロックを解除しました。 誰でも使用できます。'
+  # 所有者以外が斧で解除しようとした
+  unlock-not-owner: 'このチェストのロックを解除できるのは所有者のみです。'
+  # 設定済みチェストを所有者が破壊した
+  break-removed: 'ロック/共有化されたチェストを破壊したため、設定が解除されました。'
+  # 短時間に何度も開けようとしたときの警告（所有者へ）
+  warn-owner: '{player}が短時間に何度もあなたが管理しているチェストを開けようとしています。'
+  # 短時間に何度も開けようとしたときの警告（共有ユーザーへ）
+  warn-shared: '{player}が短時間に何度もあなたが使用できるチェストを開けようとしています。'
+  # 試行 2 回目（本人へ）
+  attempt-warn2: 'あと1回で所有者と使用可能な人に警告が行きます'
+  # 試行 3 回目（本人へ）
+  attempt-warn3-self: '所有者と使用可能な人に警告が行きました'
+  # 試行 4 回目（本人へ）
+  attempt-warn4: 'あと1回でPvPが有効になります'
+  # 試行 5 回目（所有者・共有ユーザー・破壊時は半径15m のプレイヤーへ）
+  pvp-enabled: '勝手に開けようとした{player}に対して5分間PvPが有効になりました'
+  # 設定済みチェストをもう一度設定しようとした
+  already-set: 'このチェストは既に設定されています。'
+  # MCID の存在判定が不可能なときの確認 GUI のタイトル
+  confirm-title: '{player}を追加しますか？'
+  confirm-yes: 'はい'
+  confirm-no: 'いいえ'
+  # 確認 GUI で「いいえ」を選んだとき
+  confirm-cancel: 'キャンセルしました。'
+  # 名前入力画面のプレースホルダー
+  input-placeholder: 'ユーザー名を入力'
+
+  # --- 設定拒否時のメッセージ ---
+  # 所有者以外がラージチェストへの増結を試みた
+  extend-not-owner: 'ラージチェストを増結できるのはチェストの所有者のみです。'
+  # 所有者・共有ユーザー以外が個人用チェストにホッパーの設置を試みた
+  hopper-not-owner: 'ホッパーをこのチェストに使用できるのは所有者または共有者のみです。'
+
+  # --- コマンド関連 ---
+  command-usage: '使い方: /{label} <version|list|unlock x y z|status x y z>'
+  command-version: 'ChestLock version {version}'
+  command-no-permission: 'このコマンドを実行する権限がありません。'
+  command-world-not-found: '{world}というワールドは存在しません。'
+  command-list-header: '--- 設定済みチェスト ({count}件) ---'
+  command-list-entry: '{world} ({x}, {y}, {z}) - {type} - 所有者: {owner}'
+  command-status: '{world} ({x}, {y}, {z}) の状態: {status}'
+  command-unlock-success: '{world} ({x}, {y}, {z}) のチェストの設定を解除しました。'
+  command-unlock-none: '{world} ({x}, {y}, {z}) に設定されたチェストはありません。'
+
+# 効果音（聞こえるのは行動した本人のみ）
+# Minecraft のサウンド名を指定。空欄なら再生しない。
+sounds:
+  basic: UI_BUTTON_CLICK           # 基本音（チャット表示時）
+  lock: BLOCK_ANVIL_USE            # ロック時（金床の使用時）
+  public: ENTITY_PLAYER_LEVELUP    # 公共化時（レベルアップ）
+  unlock: BLOCK_ANVIL_DESTROY      # 解除時（金床破壊）
+  break: BLOCK_ANVIL_DESTROY       # 破壊時（金床破壊）
+  extend: UI_BUTTON_CLICK          # 増築時（基本音）
+  warn: ENTITY_EXPERIENCE_ORB_PICKUP  # 警告時（経験値オーブ取得）
+  break-denied: BLOCK_ANVIL_PLACE  # 破壊失敗時（金床設置）
+  use-denied: BLOCK_ANVIL_PLACE    # 使用失敗時（金床設置）
+  unlock-denied: BLOCK_ANVIL_PLACE # 解除失敗時（金床設置）

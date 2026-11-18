@@ -1,0 +1,22 @@
+name: ChestLock
+version: '1.0'
+main: dev.chestlock.ChestLockPlugin
+api-version: '26.2'
+description: チェストをロックしたり公共用にしたりできるプラグイン
+commands:
+  chestlock:
+    description: ChestLock のコマンド
+    usage: /chestlock <version|list|unlock x y z|status x y z>
+permissions:
+  chestlock.command.version:
+    description: バージョン表示
+    default: true
+  chestlock.command.list:
+    description: 設定済みチェストの一覧表示
+    default: true
+  chestlock.command.unlock:
+    description: チェストの設定解除（OP）
+    default: op
+  chestlock.command.status:
+    description: チェストの状態表示（OP）
+    default: op

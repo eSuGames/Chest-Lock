@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# IDE
+*.iml
+.idea/
+.vscode/
+.classpath
+.project
+.settings/
+bin/
+
+# テストサーバーの生成物
+run/
+eula.txt
+server.properties
+logs/
+libraries/
+world*/
+plugins/
+cache/
+
+# OS / その他
+.DS_Store
+Thumbs.db
+*.log
+hs_err_pid*.log
