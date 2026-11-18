@@ -168,6 +168,17 @@ public final class PvpRetaliationListener implements Listener {
                 event.setCancelled(true);
                 return;
             }
+            if (activeWindow(attacker.getUniqueId()) != null) {
+                // ペナルティ対象者は抵抗できない
+                event.setCancelled(true);
+                return;
+            }
+            // ペナルティ成立のために一時的に PvP を有効化している間は、
+            // 無関係なプレイヤー同士の攻撃も通さない
+            if (flippedWorlds.contains(victim.getWorld().getUID())) {
+                event.setCancelled(true);
+            }
+            return;
         }
         if (activeWindow(attacker.getUniqueId()) != null) {
             // ペナルティ対象者は抵抗できない

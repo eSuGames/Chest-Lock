@@ -52,10 +52,11 @@ public final class ThreatTracker {
             }
         }
 
-        times.addLast(now);
-        while (!times.isEmpty() && times.peekFirst() < now - attemptWindowMs) {
-            times.pollFirst();
+        // 無操作が attemptWindowMs 続いたらカウントをリセットする
+        if (!times.isEmpty() && now - times.peekLast() > attemptWindowMs) {
+            times.clear();
         }
+        times.addLast(now);
         int count = times.size();
         if (count >= 5) {
             times.clear();

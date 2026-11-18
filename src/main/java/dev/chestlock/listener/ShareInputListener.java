@@ -81,10 +81,11 @@ public final class ShareInputListener implements Listener {
         InventoryView view = event.getView();
         Inventory top = view.getTopInventory();
         if (top.getHolder() instanceof ConfirmHolder) {
+            // プレイヤーインベントリ側も含めて全面キャンセル（Shift クリックでのアイテム移動防止）
+            event.setCancelled(true);
             if (event.getRawSlot() >= top.getSize()) {
                 return;
             }
-            event.setCancelled(true);
             if (!(event.getWhoClicked() instanceof Player player)) {
                 return;
             }
@@ -217,7 +218,13 @@ public final class ShareInputListener implements Listener {
             return;
         }
         data.addShared(ps.targetName, ps.targetUuid);
-        plugin.getStore().save();
+        org.bukkit.block.Block block = ps.key.toBlock();
+        if (block != null) {
+            // ラージチェストの両半分へ共有設定を反映する
+            plugin.getStore().update(block, data);
+        } else {
+            plugin.getStore().save();
+        }
         plugin.getMessages().send(player, "share-added", "player", ps.targetName);
         plugin.getSounds().play("basic", player, player.getLocation());
     }

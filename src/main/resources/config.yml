@@ -2,6 +2,18 @@
 # {player} = プレイヤー名、{owner} = 所有者名、{world}/{x}/{y}/{z} = 座標、{status} = 状態、{version} = バージョン
 # 空欄のメッセージは表示されません。
 
+# ===== データ保存 =====
+storage:
+  # yaml: data.yml に保存 / mariadb: MariaDB（MySQL 互換）に保存
+  type: yaml
+  mariadb:
+    host: localhost
+    port: 3306
+    database: chestlock
+    username: chestlock
+    password: ''
+    params: 'useSSL=false&autoReconnect=true'
+
 # ===== ペナルティ設定（分単位）=====
 penalty:
   # 試行のカウントがリセットされるまでの時間。この時間内に 2〜5 回の試行が積み上がります。

@@ -77,16 +77,18 @@ public final class ChestData {
         return ownerUuid != null && ownerUuid.equals(player.getUniqueId());
     }
 
-    /** 所有者または共有ユーザーなら true。 */
+    /** 所有者または共有ユーザーなら true。UUID が判明している共有ユーザーは UUID のみで判定する。 */
     public boolean canUse(Player player) {
         if (isOwner(player)) {
             return true;
         }
         for (SharedUser u : shared) {
-            if (u.uuid() != null && u.uuid().equals(player.getUniqueId())) {
-                return true;
-            }
-            if (u.name() != null && u.name().equalsIgnoreCase(player.getName())) {
+            if (u.uuid() != null) {
+                // UUID が判明している共有ユーザーは UUID のみで照合する（MCID 変更後の別人による利用を防ぐ）
+                if (u.uuid().equals(player.getUniqueId())) {
+                    return true;
+                }
+            } else if (u.name() != null && u.name().equalsIgnoreCase(player.getName())) {
                 return true;
             }
         }
@@ -95,10 +97,10 @@ public final class ChestData {
 
     public boolean isShared(String name, UUID uuid) {
         for (SharedUser u : shared) {
-            if (uuid != null && uuid.equals(u.uuid())) {
+            if (u.uuid() != null && uuid != null && u.uuid().equals(uuid)) {
                 return true;
             }
-            if (u.name() != null && u.name().equalsIgnoreCase(name)) {
+            if (u.uuid() == null && u.name() != null && name != null && u.name().equalsIgnoreCase(name)) {
                 return true;
             }
         }
@@ -130,14 +132,17 @@ public final class ChestData {
         return false;
     }
 
-    /** UUID が不明な共有ユーザーに、判明した UUID を後から登録する。 */
-    public void backfillSharedUuid(Player player) {
+    /** UUID が不明な共有ユーザーに、判明した UUID を後から登録する。変更があれば true。 */
+    public boolean backfillSharedUuid(Player player) {
+        boolean changed = false;
         for (int i = 0; i < shared.size(); i++) {
             SharedUser u = shared.get(i);
             if (u.uuid() == null && u.name() != null && u.name().equalsIgnoreCase(player.getName())) {
                 shared.set(i, new SharedUser(u.name(), player.getUniqueId()));
+                changed = true;
             }
         }
+        return changed;
     }
 
     public void addShared(String name, UUID uuid) {

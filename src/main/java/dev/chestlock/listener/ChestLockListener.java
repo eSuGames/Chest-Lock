@@ -16,12 +16,15 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -75,9 +78,12 @@ public final class ChestLockListener implements Listener {
         ItemStack item = event.getItem();
         Material material = item == null ? Material.AIR : item.getType();
         ChestData data = plugin.getStore().get(block).orElse(null);
-
-        // 鉄チェーン + シフト右クリック：公共用チェストに設定
+        if (data != null && data.backfillSharedUuid(player)) {
+            // UUID が判明した共有ユーザー情報を保存する
+            plugin.getStore().update(block, data);
+        }
         if (player.isSneaking() && ItemUtil.isIronChain(material)) {
+            // 鉄チェーン + シフト右クリック：公共用チェストに設定
             event.setCancelled(true);
             if (data != null && !isAdmin(player)) {
                 plugin.getMessages().send(player, "already-set");
@@ -141,8 +147,25 @@ public final class ChestLockListener implements Listener {
             event.setCancelled(true);
             plugin.getMessages().send(player, "locked-no-use");
             plugin.getSounds().play("use-denied", player, block.getLocation());
-            handleThreat(player, ChestKey.of(block), data, false, block);
+            handleThreat(player, canonicalKey(block), data, false, block);
         }
+    }
+
+    /** ラージチェストの左右を同じ試行として数えるための正規化キー。 */
+    private ChestKey canonicalKey(Block block) {
+        Block partner = ItemUtil.findPartnerHalf(block);
+        if (partner == null) {
+            return ChestKey.of(block);
+        }
+        ChestKey a = ChestKey.of(block);
+        ChestKey b = ChestKey.of(partner);
+        if (a.x() != b.x()) {
+            return a.x() < b.x() ? a : b;
+        }
+        if (a.y() != b.y()) {
+            return a.y() < b.y() ? a : b;
+        }
+        return a.z() <= b.z() ? a : b;
     }
 
     /** 試行の段階に応じた警告・ペナルティ処理。 */
@@ -239,9 +262,7 @@ public final class ChestLockListener implements Listener {
         }
         Player player = event.getPlayer();
         if (data.isOwner(player)) {
-            plugin.getStore().unregister(block);
-            plugin.getMessages().send(player, "break-removed");
-            plugin.getSounds().play("break", player, block.getLocation());
+            // 解除処理は onBreakConfirmed（MONITOR）で破壊確定後に実施する
             return;
         }
         event.setCancelled(true);
@@ -251,7 +272,43 @@ public final class ChestLockListener implements Listener {
         } else {
             plugin.getMessages().send(player, "private-no-break", "owner", data.getOwnerName());
         }
-        handleThreat(player, ChestKey.of(block), data, true, block);
+        handleThreat(player, canonicalKey(block), data, true, block);
+    }
+
+    /**
+     * 破壊が最終的に許可された場合のみロックを解除する。
+     * 他プラグイン（土地保護等）が後から破壊をキャンセルしたときに、
+     * チェストが残ったまま設定だけ消えるのを防ぐ。
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBreakConfirmed(BlockBreakEvent event) {
+        Block block = event.getBlock();
+        if (!ItemUtil.isChestBlock(block)) {
+            return;
+        }
+        ChestData data = plugin.getStore().get(block).orElse(null);
+        if (data == null || !data.isOwner(event.getPlayer())) {
+            return;
+        }
+        plugin.getStore().unregister(block);
+        plugin.getMessages().send(event.getPlayer(), "break-removed");
+        plugin.getSounds().play("break", event.getPlayer(), block.getLocation());
+    }
+
+    /** 爆爆発（TNT・クリーパー等）による設定済みチェストの破壊を防ぐ。 */
+    @EventHandler(ignoreCancelled = true)
+    public void onEntityExplode(EntityExplodeEvent event) {
+        protectFromExplosion(event.blockList());
+    }
+
+    /** 爆発（ベッド・リスポーンアンカー等）による設定済みチェストの破壊を防ぐ。 */
+    @EventHandler(ignoreCancelled = true)
+    public void onBlockExplode(BlockExplodeEvent event) {
+        protectFromExplosion(event.blockList());
+    }
+
+    private void protectFromExplosion(List<Block> blocks) {
+        blocks.removeIf(block -> ItemUtil.isChestBlock(block) && plugin.getStore().get(block).isPresent());
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -282,8 +339,8 @@ public final class ChestLockListener implements Listener {
             if (existing.isEmpty()) {
                 continue;
             }
-            boolean merged = neighborChest.getType() == Chest.Type.SINGLE
-                    || newChest.getType() != Chest.Type.SINGLE;
+            boolean merged = newChest.getType() != Chest.Type.SINGLE
+                    && neighborChest.getType() != Chest.Type.SINGLE;
             if (!merged) {
                 continue;
             }
