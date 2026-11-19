@@ -37,7 +37,14 @@ public final class ChestLockPlugin extends JavaPlugin {
         sounds = new Sounds();
         sounds.load(getConfig(), defaults, getLogger());
         store = new ChestStore(this);
-        store.load();
+        try {
+            store.load();
+        } catch (Exception e) {
+            // 読み込み失敗を「データなし」と区別し、保護なしで稼働させない
+            getLogger().log(java.util.logging.Level.SEVERE, "データの読み込みに失敗したため ChestLock を停止します。", e);
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
 
         shareInput = new ShareInputListener(this);
         pvpRetaliation = new PvpRetaliationListener(this,
@@ -57,7 +64,7 @@ public final class ChestLockPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (store != null) {
-            store.save();
+            store.close();
         }
     }
 

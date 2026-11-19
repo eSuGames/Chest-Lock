@@ -12,6 +12,9 @@ import java.sql.Statement;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -26,6 +29,16 @@ public final class MariaDbStorage implements StorageBackend {
     private final String username;
     private final String password;
     private final Logger logger;
+    /** 書き込みは単一スレッドで順序を保って非同期実行し、メインスレッドを止めない。 */
+    private final ExecutorService writer = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "ChestLock-MariaDB");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    private interface SqlTask {
+        void run() throws SQLException;
+    }
 
     public MariaDbStorage(String host, int port, String database, String username, String password, String params, Logger logger) {
         this.url = "jdbc:mariadb://" + host + ":" + port + "/" + database + (params == null || params.isEmpty() ? "" : "?" + params);
@@ -41,6 +54,17 @@ public final class MariaDbStorage implements StorageBackend {
 
     private Connection connect() throws SQLException {
         return DriverManager.getConnection(url, username, password);
+    }
+
+    /** 書き込み処理を非同期で実行する。 */
+    private void execute(String what, SqlTask task) {
+        writer.execute(() -> {
+            try {
+                task.run();
+            } catch (SQLException e) {
+                logger.log(Level.SEVERE, "MariaDB への" + what + "に失敗しました", e);
+            }
+        });
     }
 
     /** テーブルを作成する。接続できない場合は SQLException を送出。 */
@@ -132,73 +156,93 @@ public final class MariaDbStorage implements StorageBackend {
                 }
             }
         } catch (SQLException e) {
-            logger.log(Level.SEVERE, "MariaDB からの読み込みに失敗しました", e);
+            // 読み込み失敗を「データなし」と区別する：保護なしで稼働させないため例外で中断する
+            throw new IllegalStateException("MariaDB からのデータ読み込みに失敗しました", e);
         }
         return new LoadedData(chests, hoppers, minecarts);
     }
 
     @Override
     public void saveChest(ChestKey key, ChestData data) {
+        execute("チェスト設定の保存", () -> saveChestSync(key, data));
+    }
+
+    /** チェスト本体と共有情報を 1 つのトランザクションで保存する。 */
+    private void saveChestSync(ChestKey key, ChestData data) throws SQLException {
         try (Connection c = connect()) {
-            try (PreparedStatement ps = c.prepareStatement(
-                    "INSERT INTO cl_chests (world, x, y, z, type, owner_name, owner_uuid) VALUES (?, ?, ?, ?, ?, ?, ?) "
-                            + "ON DUPLICATE KEY UPDATE type = VALUES(type), owner_name = VALUES(owner_name), owner_uuid = VALUES(owner_uuid)")) {
-                ps.setString(1, key.world());
-                ps.setInt(2, key.x());
-                ps.setInt(3, key.y());
-                ps.setInt(4, key.z());
-                ps.setString(5, data.getType().name());
-                ps.setString(6, data.getOwnerName());
-                ps.setString(7, data.getOwnerUuid() == null ? null : data.getOwnerUuid().toString());
-                ps.executeUpdate();
-            }
-            try (PreparedStatement ps = c.prepareStatement(
-                    "DELETE FROM cl_shared WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
-                ps.setString(1, key.world());
-                ps.setInt(2, key.x());
-                ps.setInt(3, key.y());
-                ps.setInt(4, key.z());
-                ps.executeUpdate();
-            }
-            try (PreparedStatement ps = c.prepareStatement(
-                    "INSERT INTO cl_shared (world, x, y, z, shared_name, shared_uuid) VALUES (?, ?, ?, ?, ?, ?)")) {
-                for (ChestData.SharedUser user : data.getShared()) {
+            c.setAutoCommit(false);
+            try {
+                try (PreparedStatement ps = c.prepareStatement(
+                        "INSERT INTO cl_chests (world, x, y, z, type, owner_name, owner_uuid) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                                + "ON DUPLICATE KEY UPDATE type = VALUES(type), owner_name = VALUES(owner_name), owner_uuid = VALUES(owner_uuid)")) {
                     ps.setString(1, key.world());
                     ps.setInt(2, key.x());
                     ps.setInt(3, key.y());
                     ps.setInt(4, key.z());
-                    ps.setString(5, user.name());
-                    ps.setString(6, user.uuid() == null ? null : user.uuid().toString());
-                    ps.addBatch();
+                    ps.setString(5, data.getType().name());
+                    ps.setString(6, data.getOwnerName());
+                    ps.setString(7, data.getOwnerUuid() == null ? null : data.getOwnerUuid().toString());
+                    ps.executeUpdate();
                 }
-                ps.executeBatch();
+                try (PreparedStatement ps = c.prepareStatement(
+                        "DELETE FROM cl_shared WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+                    ps.setString(1, key.world());
+                    ps.setInt(2, key.x());
+                    ps.setInt(3, key.y());
+                    ps.setInt(4, key.z());
+                    ps.executeUpdate();
+                }
+                try (PreparedStatement ps = c.prepareStatement(
+                        "INSERT INTO cl_shared (world, x, y, z, shared_name, shared_uuid) VALUES (?, ?, ?, ?, ?, ?)")) {
+                    for (ChestData.SharedUser user : data.getShared()) {
+                        ps.setString(1, key.world());
+                        ps.setInt(2, key.x());
+                        ps.setInt(3, key.y());
+                        ps.setInt(4, key.z());
+                        ps.setString(5, user.name());
+                        ps.setString(6, user.uuid() == null ? null : user.uuid().toString());
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+                c.commit();
+            } catch (SQLException e) {
+                c.rollback();
+                throw e;
             }
-        } catch (SQLException e) {
-            logger.log(Level.SEVERE, "MariaDB への保存に失敗しました", e);
         }
     }
 
     @Override
     public void deleteChest(ChestKey key) {
+        execute("チェスト設定の削除", () -> deleteChestSync(key));
+    }
+
+    private void deleteChestSync(ChestKey key) throws SQLException {
         try (Connection c = connect()) {
-            try (PreparedStatement ps = c.prepareStatement(
-                    "DELETE FROM cl_shared WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
-                ps.setString(1, key.world());
-                ps.setInt(2, key.x());
-                ps.setInt(3, key.y());
-                ps.setInt(4, key.z());
-                ps.executeUpdate();
+            c.setAutoCommit(false);
+            try {
+                try (PreparedStatement ps = c.prepareStatement(
+                        "DELETE FROM cl_shared WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+                    ps.setString(1, key.world());
+                    ps.setInt(2, key.x());
+                    ps.setInt(3, key.y());
+                    ps.setInt(4, key.z());
+                    ps.executeUpdate();
+                }
+                try (PreparedStatement ps = c.prepareStatement(
+                        "DELETE FROM cl_chests WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+                    ps.setString(1, key.world());
+                    ps.setInt(2, key.x());
+                    ps.setInt(3, key.y());
+                    ps.setInt(4, key.z());
+                    ps.executeUpdate();
+                }
+                c.commit();
+            } catch (SQLException e) {
+                c.rollback();
+                throw e;
             }
-            try (PreparedStatement ps = c.prepareStatement(
-                    "DELETE FROM cl_chests WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
-                ps.setString(1, key.world());
-                ps.setInt(2, key.x());
-                ps.setInt(3, key.y());
-                ps.setInt(4, key.z());
-                ps.executeUpdate();
-            }
-        } catch (SQLException e) {
-            logger.log(Level.SEVERE, "MariaDB からの削除に失敗しました", e);
         }
     }
 
@@ -208,19 +252,19 @@ public final class MariaDbStorage implements StorageBackend {
         if (chestKey == null) {
             return;
         }
-        try (Connection c = connect();
-             PreparedStatement ps = c.prepareStatement(
-                     "INSERT INTO cl_hoppers (world, x, y, z, owner_uuid) VALUES (?, ?, ?, ?, ?) "
-                             + "ON DUPLICATE KEY UPDATE owner_uuid = VALUES(owner_uuid)")) {
-            ps.setString(1, chestKey.world());
-            ps.setInt(2, chestKey.x());
-            ps.setInt(3, chestKey.y());
-            ps.setInt(4, chestKey.z());
-            ps.setString(5, owner.toString());
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            logger.log(Level.SEVERE, "MariaDB への保存に失敗しました", e);
-        }
+        execute("保存", () -> {
+            try (Connection c = connect();
+                 PreparedStatement ps = c.prepareStatement(
+                         "INSERT INTO cl_hoppers (world, x, y, z, owner_uuid) VALUES (?, ?, ?, ?, ?) "
+                                 + "ON DUPLICATE KEY UPDATE owner_uuid = VALUES(owner_uuid)")) {
+                ps.setString(1, chestKey.world());
+                ps.setInt(2, chestKey.x());
+                ps.setInt(3, chestKey.y());
+                ps.setInt(4, chestKey.z());
+                ps.setString(5, owner.toString());
+                ps.executeUpdate();
+            }
+        });
     }
 
     @Override
@@ -229,36 +273,48 @@ public final class MariaDbStorage implements StorageBackend {
         if (chestKey == null) {
             return;
         }
-        try (Connection c = connect();
-             PreparedStatement ps = c.prepareStatement(
-                     "DELETE FROM cl_hoppers WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
-            ps.setString(1, chestKey.world());
-            ps.setInt(2, chestKey.x());
-            ps.setInt(3, chestKey.y());
-            ps.setInt(4, chestKey.z());
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            logger.log(Level.SEVERE, "MariaDB からの削除に失敗しました", e);
-        }
+        execute("削除", () -> {
+            try (Connection c = connect();
+                 PreparedStatement ps = c.prepareStatement(
+                         "DELETE FROM cl_hoppers WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+                ps.setString(1, chestKey.world());
+                ps.setInt(2, chestKey.x());
+                ps.setInt(3, chestKey.y());
+                ps.setInt(4, chestKey.z());
+                ps.executeUpdate();
+            }
+        });
     }
 
     @Override
     public void saveMinecart(UUID entityId, UUID owner) {
-        try (Connection c = connect();
-             PreparedStatement ps = c.prepareStatement(
-                     "INSERT INTO cl_minecarts (entity_uuid, owner_uuid) VALUES (?, ?) "
-                             + "ON DUPLICATE KEY UPDATE owner_uuid = VALUES(owner_uuid)")) {
-            ps.setString(1, entityId.toString());
-            ps.setString(2, owner.toString());
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            logger.log(Level.SEVERE, "MariaDB への保存に失敗しました", e);
-        }
+        execute("保存", () -> {
+            try (Connection c = connect();
+                 PreparedStatement ps = c.prepareStatement(
+                         "INSERT INTO cl_minecarts (entity_uuid, owner_uuid) VALUES (?, ?) "
+                                 + "ON DUPLICATE KEY UPDATE owner_uuid = VALUES(owner_uuid)")) {
+                ps.setString(1, entityId.toString());
+                ps.setString(2, owner.toString());
+                ps.executeUpdate();
+            }
+        });
     }
 
     @Override
     public void flush(LoadedData data) {
         // 行単位で都度保存しているため何もしない
+    }
+
+    /** 未完了の書き込みを待ってから終了する。 */
+    public void close() {
+        writer.shutdown();
+        try {
+            if (!writer.awaitTermination(10, TimeUnit.SECONDS)) {
+                logger.warning("MariaDB への書き込みが完了する前に終了しました。");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static UUID parseUuid(String value) {

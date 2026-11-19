@@ -10,6 +10,7 @@ import org.bukkit.block.DoubleChest;
 import org.bukkit.entity.minecart.HopperMinecart;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
@@ -83,6 +84,16 @@ public final class HopperListener implements Listener {
         return lockedChestDataAt(hopperBlock.getRelative(hopperData.getFacing()));
     }
 
+    /** ホッパーが触れる個人用チェストのブロック。 */
+    private Block touchedLockedChestBlock(Block hopperBlock, org.bukkit.block.data.type.Hopper hopperData) {
+        Block up = hopperBlock.getRelative(BlockFace.UP);
+        if (lockedChestDataAt(up) != null) {
+            return up;
+        }
+        Block front = hopperBlock.getRelative(hopperData.getFacing());
+        return lockedChestDataAt(front) != null ? front : null;
+    }
+
     /** 個人用チェストとのアイテム搬送は所有者・共有ユーザーのホッパーのみ許可する。 */
     @EventHandler(ignoreCancelled = true)
     public void onItemMove(InventoryMoveItemEvent event) {
@@ -104,7 +115,7 @@ public final class HopperListener implements Listener {
     }
 
     /** ホッパーの設置：個人用チェストに触れる位置は所有者と共有ユーザーのみ。 */
-    @EventHandler(ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onHopperPlace(BlockPlaceEvent event) {
         Block block = event.getBlock();
         if (block.getType() != Material.HOPPER) {
@@ -118,39 +129,73 @@ public final class HopperListener implements Listener {
         if (touched != null && !touched.canUse(player)) {
             event.setCancelled(true);
             plugin.getMessages().send(player, "hopper-not-owner");
+        }
+    }
+
+    /** 設置が確定してから設置者を記録する（他プラグインによるキャンセル対策）。 */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onHopperPlaceConfirmed(BlockPlaceEvent event) {
+        Block block = event.getBlock();
+        if (block.getType() != Material.HOPPER) {
             return;
         }
-        if (touched != null) {
-            touched.backfillSharedUuid(player);
+        if (!(block.getBlockData() instanceof org.bukkit.block.data.type.Hopper hopperData)) {
+            return;
+        }
+        Player player = event.getPlayer();
+        Block touchedBlock = touchedLockedChestBlock(block, hopperData);
+        if (touchedBlock != null) {
+            ChestData touched = plugin.getStore().get(touchedBlock).orElse(null);
+            if (touched != null && touched.backfillSharedUuid(player)) {
+                plugin.getStore().update(touchedBlock, touched);
+            }
         }
         plugin.getStore().setHopperOwner(block, player.getUniqueId());
     }
 
     /** ホッパー付きトロッコの設置：個人用チェストの直上・直下は所有者と共有ユーザーのみ。 */
-    @EventHandler(ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onMinecartPlace(EntityPlaceEvent event) {
         if (!(event.getEntity() instanceof HopperMinecart minecart)) {
             return;
         }
         Player player = event.getPlayer();
-        Block at = minecart.getLocation().getBlock();
-        ChestData touched = lockedChestDataAt(at);
-        if (touched == null) {
-            touched = lockedChestDataAt(at.getRelative(BlockFace.DOWN));
-        }
+        Block touchedBlock = minecartTouchedChestBlock(minecart);
+        ChestData touched = touchedBlock == null ? null : lockedChestDataAt(touchedBlock);
         if (touched != null && !touched.canUse(player)) {
             event.setCancelled(true);
             plugin.getMessages().send(player, "hopper-not-owner");
+        }
+    }
+
+    /** 設置が確定してから設置者を記録する（他プラグインによるキャンセル対策）。 */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onMinecartPlaceConfirmed(EntityPlaceEvent event) {
+        if (!(event.getEntity() instanceof HopperMinecart minecart)) {
             return;
         }
-        if (touched != null) {
-            touched.backfillSharedUuid(player);
+        Player player = event.getPlayer();
+        Block touchedBlock = minecartTouchedChestBlock(minecart);
+        if (touchedBlock != null) {
+            ChestData touched = plugin.getStore().get(touchedBlock).orElse(null);
+            if (touched != null && touched.backfillSharedUuid(player)) {
+                plugin.getStore().update(touchedBlock, touched);
+            }
         }
         plugin.getStore().setMinecartOwner(minecart.getUniqueId(), player.getUniqueId());
     }
 
-    /** ホッパー破壊時に設置者記録を削除する。 */
-    @EventHandler(ignoreCancelled = true)
+    private Block minecartTouchedChestBlock(HopperMinecart minecart) {
+        Block at = minecart.getLocation().getBlock();
+        if (lockedChestDataAt(at) != null) {
+            return at;
+        }
+        Block down = at.getRelative(BlockFace.DOWN);
+        return lockedChestDataAt(down) != null ? down : null;
+    }
+
+    /** ホッパー破壊が確定してから設置者記録を削除する。 */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onHopperBreak(BlockBreakEvent event) {
         if (event.getBlock().getType() == Material.HOPPER) {
             plugin.getStore().removeHopper(event.getBlock());

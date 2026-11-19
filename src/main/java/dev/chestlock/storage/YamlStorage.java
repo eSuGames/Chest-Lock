@@ -136,7 +136,17 @@ public final class YamlStorage implements StorageBackend {
         }
         try {
             file.getParentFile().mkdirs();
-            yaml.save(file);
+            // 一時ファイルに書いてから安全に置き換える
+            File tmp = new File(file.getParentFile(), file.getName() + ".tmp");
+            yaml.save(tmp);
+            try {
+                java.nio.file.Files.move(tmp.toPath(), file.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException e) {
+                java.nio.file.Files.move(tmp.toPath(), file.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             logger.log(Level.SEVERE, "data.yml の保存に失敗しました", e);
         }

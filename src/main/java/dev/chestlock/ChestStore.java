@@ -59,11 +59,40 @@ public final class ChestStore {
         chests.putAll(data.chests());
         hopperOwners.putAll(data.hoppers());
         minecartOwners.putAll(data.minecarts());
+
+        // YAML から MariaDB へ切り替えた場合、DB が空のときだけ data.yml の内容を移行する
+        if (backend instanceof MariaDbStorage && data.chests().isEmpty()) {
+            YamlStorage yaml = new YamlStorage(new File(plugin.getDataFolder(), "data.yml"), plugin.getLogger());
+            StorageBackend.LoadedData old = yaml.load();
+            if (!old.chests().isEmpty()) {
+                for (Map.Entry<ChestKey, ChestData> entry : old.chests().entrySet()) {
+                    backend.saveChest(entry.getKey(), entry.getValue());
+                }
+                for (Map.Entry<String, UUID> entry : old.hoppers().entrySet()) {
+                    backend.saveHopper(entry.getKey(), entry.getValue());
+                }
+                for (Map.Entry<UUID, UUID> entry : old.minecarts().entrySet()) {
+                    backend.saveMinecart(entry.getKey(), entry.getValue());
+                }
+                chests.putAll(old.chests());
+                hopperOwners.putAll(old.hoppers());
+                minecartOwners.putAll(old.minecarts());
+                plugin.getLogger().info("data.yml の既存データ " + old.chests().size() + " 件を MariaDB へ移行しました。");
+            }
+        }
     }
 
     /** 全データを書き出す（YAML のみ実際に書き換え、DB は都度保存済み）。 */
     public void save() {
         backend.flush(new StorageBackend.LoadedData(chests, hopperOwners, minecartOwners));
+    }
+
+    /** 終了処理：未保存の内容を書き出してから接続を閉じる。 */
+    public void close() {
+        save();
+        if (backend instanceof MariaDbStorage db) {
+            db.close();
+        }
     }
 
     /** 座標に直接設定されたデータを返す。 */
@@ -110,6 +139,8 @@ public final class ChestStore {
             chests.put(partnerKey, data.copy());
             backend.saveChest(partnerKey, data);
         }
+        // 変更を即座に永続化する（クラッシュ時のデータ消失防止）
+        save();
     }
 
     /** 片方の半分だけに設定を追加する（増結時の引き継ぎ用）。 */
@@ -117,6 +148,7 @@ public final class ChestStore {
         ChestKey key = ChestKey.of(block);
         chests.put(key, data.copy());
         backend.saveChest(key, data);
+        save();
     }
 
     /** チェストの設定を解除する。ラージチェストの場合は両半分を解除する。 */
@@ -146,6 +178,7 @@ public final class ChestStore {
     private void deleteKey(ChestKey key) {
         chests.remove(key);
         backend.deleteChest(key);
+        save();
     }
 
     public Map<ChestKey, ChestData> all() {
@@ -158,6 +191,7 @@ public final class ChestStore {
         String key = ChestKey.of(block).toKeyString();
         hopperOwners.put(key, owner);
         backend.saveHopper(key, owner);
+        save();
     }
 
     public UUID getHopperOwner(ChestKey key) {
@@ -172,12 +206,14 @@ public final class ChestStore {
         String key = ChestKey.of(block).toKeyString();
         if (hopperOwners.remove(key) != null) {
             backend.deleteHopper(key);
+            save();
         }
     }
 
     public void setMinecartOwner(UUID entityId, UUID owner) {
         minecartOwners.put(entityId, owner);
         backend.saveMinecart(entityId, owner);
+        save();
     }
 
     public UUID getMinecartOwner(UUID entityId) {

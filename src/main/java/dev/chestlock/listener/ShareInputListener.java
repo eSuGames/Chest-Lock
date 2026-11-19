@@ -148,13 +148,11 @@ public final class ShareInputListener implements Listener {
         if (ps == null || ps.confirming) {
             return;
         }
-        Inventory top = event.getView().getTopInventory();
-        if (!(event.getView() instanceof AnvilView anvilView)) {
+        if (!(event.getView() instanceof AnvilView)) {
             return;
         }
-        String text = anvilView.getRenameText();
+        // 明示的な確定（結果スロットのクリック）がない限り共有は登録しない
         pending.remove(player.getUniqueId());
-        handleName(player, ps, text);
     }
 
     @EventHandler

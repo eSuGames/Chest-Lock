@@ -36,20 +36,21 @@ public final class PvpRetaliationListener implements Listener {
 
     private static final class Window {
         private final long expiresAt;
-        private final Set<UUID> attackerIds = new HashSet<>();
-        private final Set<String> attackerNames = new HashSet<>();
+        /** UUID が判明している攻撃許可者。 */
+        private final Set<UUID> verifiedIds = new HashSet<>();
+        /** UUID 未確認（名前のみ）の共有ユーザー。 */
+        private final Set<String> unverifiedNames = new HashSet<>();
 
         Window(long expiresAt, ChestData data) {
             this.expiresAt = expiresAt;
             if (data.getOwnerUuid() != null) {
-                attackerIds.add(data.getOwnerUuid());
+                verifiedIds.add(data.getOwnerUuid());
             }
             for (ChestData.SharedUser user : data.getShared()) {
                 if (user.uuid() != null) {
-                    attackerIds.add(user.uuid());
-                }
-                if (user.name() != null) {
-                    attackerNames.add(user.name());
+                    verifiedIds.add(user.uuid());
+                } else if (user.name() != null) {
+                    unverifiedNames.add(user.name());
                 }
             }
         }
@@ -59,7 +60,9 @@ public final class PvpRetaliationListener implements Listener {
         }
 
         boolean allows(Player player) {
-            return attackerIds.contains(player.getUniqueId()) || attackerNames.contains(player.getName());
+            // UUID が判明している共有ユーザーは UUID のみで判定する（MCID 変更後の別人を防ぐ）
+            return verifiedIds.contains(player.getUniqueId())
+                    || unverifiedNames.contains(player.getName());
         }
     }
 
@@ -164,7 +167,12 @@ public final class PvpRetaliationListener implements Listener {
         }
         if (event.getEntity() instanceof Player victim) {
             Window victimWindow = activeWindow(victim.getUniqueId());
-            if (victimWindow != null && !victimWindow.allows(attacker)) {
+            if (victimWindow != null) {
+                if (victimWindow.allows(attacker)) {
+                    // 許可された攻撃（PvP 無効ワールドではフリップ中に発生する）は通す
+                    return;
+                }
+                // 所有者・共有ユーザー以外は攻撃できない
                 event.setCancelled(true);
                 return;
             }
