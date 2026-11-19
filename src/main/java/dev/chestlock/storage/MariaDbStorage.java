@@ -305,6 +305,85 @@ public final class MariaDbStorage implements StorageBackend {
         // 行単位で都度保存しているため何もしない
     }
 
+    /**
+     * YAML からの移行を同期・1 トランザクションで実行する。
+     * 全件の保存に成功した場合のみ完了となる。失敗時は SQLException を送出。
+     */
+    public void importAll(Map<ChestKey, ChestData> chests, Map<String, UUID> hoppers, Map<UUID, UUID> minecarts) throws SQLException {
+        try (Connection c = connect()) {
+            c.setAutoCommit(false);
+            try {
+                try (Statement s = c.createStatement()) {
+                    s.executeUpdate("DELETE FROM cl_shared");
+                    s.executeUpdate("DELETE FROM cl_chests");
+                    s.executeUpdate("DELETE FROM cl_hoppers");
+                    s.executeUpdate("DELETE FROM cl_minecarts");
+                }
+                try (PreparedStatement ps = c.prepareStatement(
+                        "INSERT INTO cl_chests (world, x, y, z, type, owner_name, owner_uuid) VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+                    for (Map.Entry<ChestKey, ChestData> entry : chests.entrySet()) {
+                        ChestKey key = entry.getKey();
+                        ChestData data = entry.getValue();
+                        ps.setString(1, key.world());
+                        ps.setInt(2, key.x());
+                        ps.setInt(3, key.y());
+                        ps.setInt(4, key.z());
+                        ps.setString(5, data.getType().name());
+                        ps.setString(6, data.getOwnerName());
+                        ps.setString(7, data.getOwnerUuid() == null ? null : data.getOwnerUuid().toString());
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+                try (PreparedStatement ps = c.prepareStatement(
+                        "INSERT INTO cl_shared (world, x, y, z, shared_name, shared_uuid) VALUES (?, ?, ?, ?, ?, ?)")) {
+                    for (Map.Entry<ChestKey, ChestData> entry : chests.entrySet()) {
+                        ChestKey key = entry.getKey();
+                        for (ChestData.SharedUser user : entry.getValue().getShared()) {
+                            ps.setString(1, key.world());
+                            ps.setInt(2, key.x());
+                            ps.setInt(3, key.y());
+                            ps.setInt(4, key.z());
+                            ps.setString(5, user.name());
+                            ps.setString(6, user.uuid() == null ? null : user.uuid().toString());
+                            ps.addBatch();
+                        }
+                    }
+                    ps.executeBatch();
+                }
+                try (PreparedStatement ps = c.prepareStatement(
+                        "INSERT INTO cl_hoppers (world, x, y, z, owner_uuid) VALUES (?, ?, ?, ?, ?)")) {
+                    for (Map.Entry<String, UUID> entry : hoppers.entrySet()) {
+                        ChestKey key = ChestKey.fromKeyString(entry.getKey());
+                        if (key == null) {
+                            continue;
+                        }
+                        ps.setString(1, key.world());
+                        ps.setInt(2, key.x());
+                        ps.setInt(3, key.y());
+                        ps.setInt(4, key.z());
+                        ps.setString(5, entry.getValue().toString());
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+                try (PreparedStatement ps = c.prepareStatement(
+                        "INSERT INTO cl_minecarts (entity_uuid, owner_uuid) VALUES (?, ?)")) {
+                    for (Map.Entry<UUID, UUID> entry : minecarts.entrySet()) {
+                        ps.setString(1, entry.getKey().toString());
+                        ps.setString(2, entry.getValue().toString());
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+                c.commit();
+            } catch (SQLException e) {
+                c.rollback();
+                throw e;
+            }
+        }
+    }
+
     /** 未完了の書き込みを待ってから終了する。 */
     public void close() {
         writer.shutdown();

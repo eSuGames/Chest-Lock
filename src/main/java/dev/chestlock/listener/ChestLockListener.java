@@ -311,7 +311,7 @@ public final class ChestLockListener implements Listener {
         blocks.removeIf(block -> ItemUtil.isChestBlock(block) && plugin.getStore().get(block).isPresent());
     }
 
-    @EventHandler(ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent event) {
         Block block = event.getBlock();
         if (!ItemUtil.isChestBlock(block)) {
@@ -320,7 +320,46 @@ public final class ChestLockListener implements Listener {
         if (!(block.getBlockData() instanceof Chest newChest)) {
             return;
         }
-        // 設定済みチェストに増結された場合、設定を引き継ぐ
+        // 設定済みチェストに増結される場合、増結できるのは所有者のみ
+        Block neighbor = mergedNeighbor(block, newChest);
+        if (neighbor == null) {
+            return;
+        }
+        Optional<ChestData> existing = plugin.getStore().getDirect(neighbor);
+        if (existing.isEmpty()) {
+            return;
+        }
+        if (!existing.get().isOwner(event.getPlayer())) {
+            event.setCancelled(true);
+            plugin.getMessages().send(event.getPlayer(), "extend-not-owner");
+        }
+    }
+
+    /** 増結が確定してから設定を引き継ぐ（他プラグインによるキャンセル対策）。 */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlaceConfirmed(BlockPlaceEvent event) {
+        Block block = event.getBlock();
+        if (!ItemUtil.isChestBlock(block)) {
+            return;
+        }
+        if (!(block.getBlockData() instanceof Chest newChest)) {
+            return;
+        }
+        Block neighbor = mergedNeighbor(block, newChest);
+        if (neighbor == null) {
+            return;
+        }
+        Optional<ChestData> existing = plugin.getStore().getDirect(neighbor);
+        if (existing.isEmpty() || !existing.get().isOwner(event.getPlayer())) {
+            return;
+        }
+        plugin.getStore().set(block, existing.get());
+        plugin.getMessages().send(event.getPlayer(), "large-inherit");
+        plugin.getSounds().play("extend", event.getPlayer(), block.getLocation());
+    }
+
+    /** 増結合の相手になる隣接チェスト。実際に結合していない場合は null。 */
+    private Block mergedNeighbor(Block block, Chest newChest) {
         for (Block neighbor : new Block[]{
                 block.getRelative(org.bukkit.block.BlockFace.NORTH),
                 block.getRelative(org.bukkit.block.BlockFace.SOUTH),
@@ -335,25 +374,12 @@ public final class ChestLockListener implements Listener {
             if (neighborChest.getFacing() != newChest.getFacing()) {
                 continue;
             }
-            Optional<ChestData> existing = plugin.getStore().getDirect(neighbor);
-            if (existing.isEmpty()) {
-                continue;
-            }
             boolean merged = newChest.getType() != Chest.Type.SINGLE
                     && neighborChest.getType() != Chest.Type.SINGLE;
-            if (!merged) {
-                continue;
+            if (merged) {
+                return neighbor;
             }
-            // ラージチェストへの増結は所有者のみ可能
-            if (!existing.get().isOwner(event.getPlayer())) {
-                event.setCancelled(true);
-                plugin.getMessages().send(event.getPlayer(), "extend-not-owner");
-                return;
-            }
-            plugin.getStore().set(block, existing.get());
-            plugin.getMessages().send(event.getPlayer(), "large-inherit");
-            plugin.getSounds().play("extend", event.getPlayer(), block.getLocation());
-            return;
         }
+        return null;
     }
 }

@@ -32,6 +32,7 @@ public final class ChestStore {
     private StorageBackend createBackend() {
         String type = plugin.getConfig().getString("storage.type", "yaml");
         if ("mariadb".equalsIgnoreCase(type)) {
+            // MariaDB が指定されている場合は接続失敗時に停止する（古い YAML へ自動切替しない）
             MariaDbStorage db = new MariaDbStorage(
                     plugin.getConfig().getString("storage.mariadb.host", "localhost"),
                     plugin.getConfig().getInt("storage.mariadb.port", 3306),
@@ -42,11 +43,11 @@ public final class ChestStore {
                     plugin.getLogger());
             try {
                 db.init();
-                plugin.getLogger().info("MariaDB を保存先として使用します。");
-                return db;
             } catch (Exception e) {
-                plugin.getLogger().severe("MariaDB に接続できませんでした。data.yml にフォールバックします。: " + e.getMessage());
+                throw new IllegalStateException("MariaDB に接続できません。データ不整合を防ぐため ChestLock は動作を停止します。", e);
             }
+            plugin.getLogger().info("MariaDB を保存先として使用します。");
+            return db;
         }
         return new YamlStorage(new File(plugin.getDataFolder(), "data.yml"), plugin.getLogger());
     }
@@ -61,18 +62,15 @@ public final class ChestStore {
         minecartOwners.putAll(data.minecarts());
 
         // YAML から MariaDB へ切り替えた場合、DB が空のときだけ data.yml の内容を移行する
-        if (backend instanceof MariaDbStorage && data.chests().isEmpty()) {
+        // （同期・1 トランザクションで実行し、全件成功した場合のみ完了とする）
+        if (backend instanceof MariaDbStorage db && data.chests().isEmpty()) {
             YamlStorage yaml = new YamlStorage(new File(plugin.getDataFolder(), "data.yml"), plugin.getLogger());
             StorageBackend.LoadedData old = yaml.load();
             if (!old.chests().isEmpty()) {
-                for (Map.Entry<ChestKey, ChestData> entry : old.chests().entrySet()) {
-                    backend.saveChest(entry.getKey(), entry.getValue());
-                }
-                for (Map.Entry<String, UUID> entry : old.hoppers().entrySet()) {
-                    backend.saveHopper(entry.getKey(), entry.getValue());
-                }
-                for (Map.Entry<UUID, UUID> entry : old.minecarts().entrySet()) {
-                    backend.saveMinecart(entry.getKey(), entry.getValue());
+                try {
+                    db.importAll(old.chests(), old.hoppers(), old.minecarts());
+                } catch (Exception e) {
+                    throw new IllegalStateException("data.yml から MariaDB への移行に失敗しました。", e);
                 }
                 chests.putAll(old.chests());
                 hopperOwners.putAll(old.hoppers());
@@ -89,9 +87,10 @@ public final class ChestStore {
 
     /** 終了処理：未保存の内容を書き出してから接続を閉じる。 */
     public void close() {
-        save();
         if (backend instanceof MariaDbStorage db) {
             db.close();
+        } else if (backend instanceof YamlStorage yaml) {
+            yaml.close();
         }
     }
 

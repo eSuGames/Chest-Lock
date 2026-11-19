@@ -108,6 +108,17 @@ public final class PvpRetaliationListener implements Listener {
         });
     }
 
+    /** プラグイン停止時に、未復元のワールドの PvP 設定を元へ戻す。 */
+    public void restoreWorlds() {
+        for (UUID uid : new HashSet<>(flippedWorlds)) {
+            World world = Bukkit.getWorld(uid);
+            if (world != null && world.getPVP()) {
+                world.setPVP(false);
+            }
+            flippedWorlds.remove(uid);
+        }
+    }
+
     /** ミリェ攻撃（近接）。 */
     @EventHandler(ignoreCancelled = true)
     public void onPreAttack(PrePlayerAttackEntityEvent event) {

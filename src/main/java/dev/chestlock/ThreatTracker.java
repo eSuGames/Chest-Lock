@@ -60,6 +60,7 @@ public final class ThreatTracker {
         int count = times.size();
         if (count >= 5) {
             times.clear();
+            cleanup(offender, key, byChest, times);
             return Step.STEP5;
         }
         if (count == 4) {
@@ -74,5 +75,15 @@ public final class ThreatTracker {
             return Step.STEP2;
         }
         return Step.NONE;
+    }
+
+    /** 空になったエントリを削除してメモリを節約する。 */
+    private void cleanup(UUID offender, ChestKey key, Map<ChestKey, Deque<Long>> byChest, Deque<Long> times) {
+        if (times.isEmpty()) {
+            byChest.remove(key);
+        }
+        if (byChest.isEmpty()) {
+            attempts.remove(offender);
+        }
     }
 }

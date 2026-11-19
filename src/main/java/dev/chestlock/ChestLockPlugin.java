@@ -36,11 +36,12 @@ public final class ChestLockPlugin extends JavaPlugin {
         messages.load(getConfig(), defaults);
         sounds = new Sounds();
         sounds.load(getConfig(), defaults, getLogger());
-        store = new ChestStore(this);
         try {
+            store = new ChestStore(this);
             store.load();
         } catch (Exception e) {
-            // 読み込み失敗を「データなし」と区別し、保護なしで稼働させない
+            // 読み込み失敗（接続失敗・ファイル破損・移行失敗）を「データなし」と区別し、
+            // 保護なしで稼働させない
             getLogger().log(java.util.logging.Level.SEVERE, "データの読み込みに失敗したため ChestLock を停止します。", e);
             getServer().getPluginManager().disablePlugin(this);
             return;
@@ -63,6 +64,9 @@ public final class ChestLockPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (pvpRetaliation != null) {
+            pvpRetaliation.restoreWorlds();
+        }
         if (store != null) {
             store.close();
         }
