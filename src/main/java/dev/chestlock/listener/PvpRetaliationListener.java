@@ -139,6 +139,11 @@ public final class PvpRetaliationListener implements Listener {
                 return;
             }
             flipPvp(victim.getWorld());
+            return;
+        }
+        if (flippedWorlds.contains(victim.getWorld().getUID())) {
+            // フリップ中に成立しかけた無関係な攻撃は通さない
+            event.setCancelled(true);
         }
     }
 
@@ -169,49 +174,69 @@ public final class PvpRetaliationListener implements Listener {
         }
     }
 
-    /** その他のダメージ（ポーション等）の最終的な取り締まり。 */
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    /**
+     * プレイヤーへのダメージの最終的な取り締まり。
+     *
+     * フリップ中（PvP を一時有効化している間）は、許可された
+     * 「ペナルティ対象者 × 所有者・共有ユーザー」のペア以外の
+     * あらゆるダメージ（矢・爆発・間接攻撃を含む）を絶対に通さない。
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onDamage(EntityDamageByEntityEvent event) {
-        Player attacker = playerOf(event.getDamager());
-        if (attacker == null) {
+        enforceDamage(event, false);
+    }
+
+    /** 他のプラグインが後から変更しても最終状態を保証する最終確認。 */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
+    public void onDamageFinal(EntityDamageByEntityEvent event) {
+        enforceDamage(event, true);
+    }
+
+    private void enforceDamage(EntityDamageByEntityEvent event, boolean finalCheck) {
+        if (!(event.getEntity() instanceof Player victim)) {
             return;
         }
-        if (event.getEntity() instanceof Player victim) {
-            Window victimWindow = activeWindow(victim.getUniqueId());
-            if (victimWindow != null) {
-                if (victimWindow.allows(attacker)) {
-                    // 許可された攻撃（PvP 無効ワールドではフリップ中に発生する）は通す
-                    return;
+        Player attacker = playerOf(event.getDamager(), event.getDamageSource());
+        Window victimWindow = activeWindow(victim.getUniqueId());
+        Window attackerWindow = attacker == null ? null : activeWindow(attacker.getUniqueId());
+
+        if (flippedWorlds.contains(victim.getWorld().getUID())) {
+            // フリップ中：許可ペア（所有者・共有ユーザー → ペナルティ対象者）の攻撃のみ通す
+            boolean allowed = attacker != null
+                    && attackerWindow == null
+                    && victimWindow != null
+                    && victimWindow.allows(attacker);
+            if (allowed) {
+                if (!finalCheck && flippedWorlds.remove(victim.getWorld().getUID())) {
+                    // ダメージが成立したのでこの瞬間に PvP 設定を元へ戻す（影響時間を最小化）
+                    victim.getWorld().setPVP(false);
                 }
-                // 所有者・共有ユーザー以外は攻撃できない
-                event.setCancelled(true);
                 return;
             }
-            if (activeWindow(attacker.getUniqueId()) != null) {
-                // ペナルティ対象者は抵抗できない
-                event.setCancelled(true);
-                return;
-            }
-            // ペナルティ成立のために一時的に PvP を有効化している間は、
-            // 無関係なプレイヤー同士の攻撃も通さない
-            if (flippedWorlds.contains(victim.getWorld().getUID())) {
-                event.setCancelled(true);
-            }
+            // それ以外のあらゆるダメージ（矢・爆発・間接攻撃を含む）は通さない
+            event.setCancelled(true);
             return;
         }
-        if (activeWindow(attacker.getUniqueId()) != null) {
-            // ペナルティ対象者は抵抗できない
+
+        // ペナルティ対象者は誰も攻撃できない
+        if (attackerWindow != null) {
+            event.setCancelled(true);
+            return;
+        }
+        // ペナルティ対象者は所有者・共有ユーザーからしか攻撃されない（モブ等の通常ダメージは対象外）
+        if (victimWindow != null && attacker != null && !victimWindow.allows(attacker)) {
             event.setCancelled(true);
         }
     }
 
-    private Player playerOf(Entity damager) {
+    private Player playerOf(Entity damager, org.bukkit.damage.DamageSource source) {
         if (damager instanceof Player player) {
             return player;
         }
         if (damager instanceof Projectile projectile && projectile.getShooter() instanceof Player player) {
             return player;
         }
-        return null;
+        Entity causing = source.getCausingEntity();
+        return causing instanceof Player player ? player : null;
     }
 }
