@@ -44,6 +44,9 @@ public final class ChestLockPlugin extends JavaPlugin {
             // 保護なしで稼働させない
             getLogger().log(java.util.logging.Level.SEVERE, "データの読み込みに失敗したため ChestLock を停止します。", e);
             getServer().getPluginManager().disablePlugin(this);
+
+            // safety mechanism that protect privacy chest
+            getServer().shutdown();
             return;
         }
 
