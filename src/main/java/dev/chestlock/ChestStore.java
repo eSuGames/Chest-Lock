@@ -67,23 +67,24 @@ public final class ChestStore {
         hopperOwners.putAll(data.hoppers());
         minecartOwners.putAll(data.minecarts());
 
+        // don't need this
         // YAML から MariaDB へ切り替えた場合、DB が空のときだけ data.yml の内容を移行する
         // （同期・1 トランザクションで実行し、全件成功した場合のみ完了とする）
-        if (backend instanceof MariaDbStorage db && data.chests().isEmpty()) {
-            YamlStorage yaml = new YamlStorage(new File(plugin.getDataFolder(), "data.yml"), plugin.getLogger());
-            StorageBackend.LoadedData old = yaml.load();
-            if (!old.chests().isEmpty()) {
-                try {
-                    db.importAll(old.chests(), old.hoppers(), old.minecarts());
-                } catch (Exception e) {
-                    throw new IllegalStateException("data.yml から MariaDB への移行に失敗しました。", e);
-                }
-                chests.putAll(old.chests());
-                hopperOwners.putAll(old.hoppers());
-                minecartOwners.putAll(old.minecarts());
-                plugin.getLogger().info("data.yml の既存データ " + old.chests().size() + " 件を MariaDB へ移行しました。");
-            }
-        }
+        // if (backend instanceof MariaDbStorage db && data.chests().isEmpty()) {
+        //     YamlStorage yaml = new YamlStorage(new File(plugin.getDataFolder(), "data.yml"), plugin.getLogger());
+        //     StorageBackend.LoadedData old = yaml.load();
+        //     if (!old.chests().isEmpty()) {
+        //         try {
+        //             db.importAll(old.chests(), old.hoppers(), old.minecarts());
+        //         } catch (Exception e) {
+        //             throw new IllegalStateException("data.yml から MariaDB への移行に失敗しました。", e);
+        //         }
+        //         chests.putAll(old.chests());
+        //         hopperOwners.putAll(old.hoppers());
+        //         minecartOwners.putAll(old.minecarts());
+        //         plugin.getLogger().info("data.yml の既存データ " + old.chests().size() + " 件を MariaDB へ移行しました。");
+        //     }
+        // }
     }
 
     /** 全データを書き出す（YAML のみ実際に書き換え、DB は都度保存済み）。 */
