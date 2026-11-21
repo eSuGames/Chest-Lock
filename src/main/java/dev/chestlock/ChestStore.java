@@ -31,6 +31,7 @@ public final class ChestStore {
 
     private StorageBackend createBackend() {
         String type = plugin.getConfig().getString("storage.type", "yaml");
+
         if ("mariadb".equalsIgnoreCase(type)) {
             // MariaDB が指定されている場合は接続失敗時に停止する（古い YAML へ自動切替しない）
             MariaDbStorage db = new MariaDbStorage(
@@ -49,7 +50,12 @@ public final class ChestStore {
             plugin.getLogger().info("MariaDB を保存先として使用します。");
             return db;
         }
-        return new YamlStorage(new File(plugin.getDataFolder(), "data.yml"), plugin.getLogger());
+
+        if ("yaml".equalsIgnoreCase(type)) {
+            return new YamlStorage(new File(plugin.getDataFolder(), "data.yml"), plugin.getLogger());
+        }
+
+        throw new IllegalArgumentException("不正な storage.type です: " + type);
     }
 
     public void load() {
