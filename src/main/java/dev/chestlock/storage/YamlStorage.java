@@ -132,7 +132,7 @@ public final class YamlStorage implements StorageBackend {
 
     @Override
     public void flush(LoadedData data) {
-        LoadedData snapshot = data.copy(LinkedHashMap::new);
+        LoadedData snapshot = data.copy();
 
         pending = snapshot;
         if (scheduled.compareAndSet(false, true)) {
