@@ -10,7 +10,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -42,8 +44,10 @@ public final class MariaDbStorage implements StorageBackend {
         void run() throws SQLException;
     }
 
-    public MariaDbStorage(String host, int port, String database, String username, String password, String params, Logger logger) {
-        this.url = "jdbc:mariadb://" + host + ":" + port + "/" + database + (params == null || params.isEmpty() ? "" : "?" + params);
+    public MariaDbStorage(String host, int port, String database, String username, String password, String params,
+            Logger logger) {
+        this.url = "jdbc:mariadb://" + host + ":" + port + "/" + database
+                + (params == null || params.isEmpty() ? "" : "?" + params);
         this.username = username;
         this.password = password;
         this.logger = logger;
@@ -150,8 +154,9 @@ public final class MariaDbStorage implements StorageBackend {
         Map<String, UUID> hoppers = new LinkedHashMap<>();
         Map<UUID, UUID> minecarts = new LinkedHashMap<>();
         try (Connection c = connect()) {
-            try (PreparedStatement ps = c.prepareStatement("SELECT world, x, y, z, type, owner_name, owner_uuid FROM cl_chests");
-                 ResultSet rs = ps.executeQuery()) {
+            try (PreparedStatement ps = c
+                    .prepareStatement("SELECT world, x, y, z, type, owner_name, owner_uuid FROM cl_chests");
+                    ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     ChestKey key = new ChestKey(rs.getString(1), rs.getInt(2), rs.getInt(3), rs.getInt(4));
                     ChestData.Type type;
@@ -163,26 +168,30 @@ public final class MariaDbStorage implements StorageBackend {
                     chests.put(key, new ChestData(type, rs.getString(6), parseUuid(rs.getString(7))));
                 }
             }
-            try (PreparedStatement ps = c.prepareStatement("SELECT world, x, y, z, shared_name, shared_uuid FROM cl_shared");
-                 ResultSet rs = ps.executeQuery()) {
+            try (PreparedStatement ps = c
+                    .prepareStatement("SELECT world, x, y, z, shared_name, shared_uuid FROM cl_shared");
+                    ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    ChestData data = chests.get(new ChestKey(rs.getString(1), rs.getInt(2), rs.getInt(3), rs.getInt(4)));
+                    ChestData data = chests
+                            .get(new ChestKey(rs.getString(1), rs.getInt(2), rs.getInt(3), rs.getInt(4)));
                     if (data != null) {
                         data.addShared(rs.getString(5), parseUuid(rs.getString(6)));
                     }
                 }
             }
             try (PreparedStatement ps = c.prepareStatement("SELECT world, x, y, z, owner_uuid FROM cl_hoppers");
-                 ResultSet rs = ps.executeQuery()) {
+                    ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID owner = parseUuid(rs.getString(5));
                     if (owner != null) {
-                        hoppers.put(new ChestKey(rs.getString(1), rs.getInt(2), rs.getInt(3), rs.getInt(4)).toKeyString(), owner);
+                        hoppers.put(
+                                new ChestKey(rs.getString(1), rs.getInt(2), rs.getInt(3), rs.getInt(4)).toKeyString(),
+                                owner);
                     }
                 }
             }
             try (PreparedStatement ps = c.prepareStatement("SELECT entity_uuid, owner_uuid FROM cl_minecarts");
-                 ResultSet rs = ps.executeQuery()) {
+                    ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID entity = parseUuid(rs.getString(1));
                     UUID owner = parseUuid(rs.getString(2));
@@ -198,90 +207,121 @@ public final class MariaDbStorage implements StorageBackend {
         return new LoadedData(chests, hoppers, minecarts);
     }
 
-    @Override
-    public CompletableFuture<Void> saveChestAsync(ChestKey key, ChestData data) {
-        ChestData snapshot = data.copy();
+    public CompletableFuture<Void> modifyChestsAsync(
+            Map<ChestKey, ChestData> updates,
+            Set<ChestKey> deletes) {
+        Map<ChestKey, ChestData> snapshots = new LinkedHashMap<>();
 
-        return executeAsync("チェスト設定の保存", () -> saveChestSync(key, snapshot));
+        updates.forEach((key, data) -> snapshots.put(key, data.copy()));
+
+        Set<ChestKey> deleteSnapshots = new LinkedHashSet<>(deletes);
+
+        return executeAsync("チェスト設定の更新", () -> {
+            try (Connection c = connect()) {
+                c.setAutoCommit(false);
+
+                try {
+                    for (var entry : snapshots.entrySet()) {
+                        saveChestRows(c, entry.getKey(), entry.getValue());
+                    }
+
+                    for (ChestKey key : deleteSnapshots) {
+                        deleteChestRows(c, key);
+                    }
+
+                    c.commit();
+                } catch (SQLException e) {
+                    try {
+                        c.rollback();
+                    } catch (SQLException rollbackError) {
+                        e.addSuppressed(rollbackError);
+                    }
+
+                    throw e;
+                }
+            }
+        });
     }
 
-    /** チェスト本体と共有情報を 1 つのトランザクションで保存する。 */
-    private void saveChestSync(ChestKey key, ChestData data) throws SQLException {
-        try (Connection c = connect()) {
-            c.setAutoCommit(false);
-            try {
-                try (PreparedStatement ps = c.prepareStatement(
-                        "INSERT INTO cl_chests (world, x, y, z, type, owner_name, owner_uuid) VALUES (?, ?, ?, ?, ?, ?, ?) "
-                                + "ON DUPLICATE KEY UPDATE type = VALUES(type), owner_name = VALUES(owner_name), owner_uuid = VALUES(owner_uuid)")) {
-                    ps.setString(1, key.world());
-                    ps.setInt(2, key.x());
-                    ps.setInt(3, key.y());
-                    ps.setInt(4, key.z());
-                    ps.setString(5, data.getType().name());
-                    ps.setString(6, data.getOwnerName());
-                    ps.setString(7, data.getOwnerUuid() == null ? null : data.getOwnerUuid().toString());
-                    ps.executeUpdate();
-                }
-                try (PreparedStatement ps = c.prepareStatement(
-                        "DELETE FROM cl_shared WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
-                    ps.setString(1, key.world());
-                    ps.setInt(2, key.x());
-                    ps.setInt(3, key.y());
-                    ps.setInt(4, key.z());
-                    ps.executeUpdate();
-                }
-                try (PreparedStatement ps = c.prepareStatement(
-                        "INSERT INTO cl_shared (world, x, y, z, shared_name, shared_uuid) VALUES (?, ?, ?, ?, ?, ?)")) {
-                    for (ChestData.SharedUser user : data.getShared()) {
-                        ps.setString(1, key.world());
-                        ps.setInt(2, key.x());
-                        ps.setInt(3, key.y());
-                        ps.setInt(4, key.z());
-                        ps.setString(5, user.name());
-                        ps.setString(6, user.uuid() == null ? null : user.uuid().toString());
-                        ps.addBatch();
-                    }
-                    ps.executeBatch();
-                }
-                c.commit();
-            } catch (SQLException e) {
-                c.rollback();
-                throw e;
-            }
+    private void saveChestRows(Connection c, ChestKey key, ChestData data) throws SQLException {
+        try (
+                PreparedStatement ps = c.prepareStatement(
+                        "INSERT INTO cl_chests (world, x, y, z, type, owner_name, owner_uuid) "
+                                + "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                                + "ON DUPLICATE KEY UPDATE type = VALUES(type), "
+                                + "owner_name = VALUES(owner_name), owner_uuid = VALUES(owner_uuid)")) {
+            ps.setString(1, key.world());
+            ps.setInt(2, key.x());
+            ps.setInt(3, key.y());
+            ps.setInt(4, key.z());
+            ps.setString(5, data.getType().name());
+            ps.setString(6, data.getOwnerName());
+            ps.setString(7, data.getOwnerUuid() == null ? null : data.getOwnerUuid().toString());
+
+            ps.executeUpdate();
         }
+
+        try (PreparedStatement ps = c
+                .prepareStatement("DELETE FROM cl_shared WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+            ps.setString(1, key.world());
+            ps.setInt(2, key.x());
+            ps.setInt(3, key.y());
+            ps.setInt(4, key.z());
+
+            ps.executeUpdate();
+        }
+
+        try (
+                PreparedStatement ps = c.prepareStatement(
+                        "INSERT INTO cl_shared "
+                                + "(world, x, y, z, shared_name, shared_uuid) VALUES (?, ?, ?, ?, ?, ?)")) {
+            for (ChestData.SharedUser user : data.getShared()) {
+                ps.setString(1, key.world());
+                ps.setInt(2, key.x());
+                ps.setInt(3, key.y());
+                ps.setInt(4, key.z());
+                ps.setString(5, user.name());
+                ps.setString(6, user.uuid() == null ? null : user.uuid().toString());
+
+                ps.addBatch();
+            }
+
+            ps.executeBatch();
+        }
+    }
+
+    private void deleteChestRows(Connection c, ChestKey key) throws SQLException {
+        try (
+                PreparedStatement ps = c.prepareStatement(
+                        "DELETE FROM cl_shared WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+            ps.setString(1, key.world());
+            ps.setInt(2, key.x());
+            ps.setInt(3, key.y());
+            ps.setInt(4, key.z());
+
+            ps.executeUpdate();
+        }
+
+        try (
+                PreparedStatement ps = c.prepareStatement(
+                        "DELETE FROM cl_chests WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+            ps.setString(1, key.world());
+            ps.setInt(2, key.x());
+            ps.setInt(3, key.y());
+            ps.setInt(4, key.z());
+
+            ps.executeUpdate();
+        }
+    }
+
+    @Override
+    public CompletableFuture<Void> saveChestAsync(ChestKey key, ChestData data) {
+        return modifyChestsAsync(Map.of(key, data), Set.of());
     }
 
     @Override
     public CompletableFuture<Void> deleteChestAsync(ChestKey key) {
-        return executeAsync("チェスト設定の削除", () -> deleteChestSync(key));
-    }
-
-    private void deleteChestSync(ChestKey key) throws SQLException {
-        try (Connection c = connect()) {
-            c.setAutoCommit(false);
-            try {
-                try (PreparedStatement ps = c.prepareStatement(
-                        "DELETE FROM cl_shared WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
-                    ps.setString(1, key.world());
-                    ps.setInt(2, key.x());
-                    ps.setInt(3, key.y());
-                    ps.setInt(4, key.z());
-                    ps.executeUpdate();
-                }
-                try (PreparedStatement ps = c.prepareStatement(
-                        "DELETE FROM cl_chests WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
-                    ps.setString(1, key.world());
-                    ps.setInt(2, key.x());
-                    ps.setInt(3, key.y());
-                    ps.setInt(4, key.z());
-                    ps.executeUpdate();
-                }
-                c.commit();
-            } catch (SQLException e) {
-                c.rollback();
-                throw e;
-            }
-        }
+        return modifyChestsAsync(Map.of(), Set.of(key));
     }
 
     @Override
@@ -294,9 +334,9 @@ public final class MariaDbStorage implements StorageBackend {
 
         return executeAsync("保存", () -> {
             try (Connection c = connect();
-                 PreparedStatement ps = c.prepareStatement(
-                         "INSERT INTO cl_hoppers (world, x, y, z, owner_uuid) VALUES (?, ?, ?, ?, ?) "
-                                 + "ON DUPLICATE KEY UPDATE owner_uuid = VALUES(owner_uuid)")) {
+                    PreparedStatement ps = c.prepareStatement(
+                            "INSERT INTO cl_hoppers (world, x, y, z, owner_uuid) VALUES (?, ?, ?, ?, ?) "
+                                    + "ON DUPLICATE KEY UPDATE owner_uuid = VALUES(owner_uuid)")) {
                 ps.setString(1, chestKey.world());
                 ps.setInt(2, chestKey.x());
                 ps.setInt(3, chestKey.y());
@@ -317,8 +357,8 @@ public final class MariaDbStorage implements StorageBackend {
 
         return executeAsync("削除", () -> {
             try (Connection c = connect();
-                 PreparedStatement ps = c.prepareStatement(
-                         "DELETE FROM cl_hoppers WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
+                    PreparedStatement ps = c.prepareStatement(
+                            "DELETE FROM cl_hoppers WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
                 ps.setString(1, chestKey.world());
                 ps.setInt(2, chestKey.x());
                 ps.setInt(3, chestKey.y());
@@ -332,9 +372,9 @@ public final class MariaDbStorage implements StorageBackend {
     public CompletableFuture<Void> saveMinecartAsync(UUID entityId, UUID owner) {
         return executeAsync("保存", () -> {
             try (Connection c = connect();
-                 PreparedStatement ps = c.prepareStatement(
-                         "INSERT INTO cl_minecarts (entity_uuid, owner_uuid) VALUES (?, ?) "
-                                 + "ON DUPLICATE KEY UPDATE owner_uuid = VALUES(owner_uuid)")) {
+                    PreparedStatement ps = c.prepareStatement(
+                            "INSERT INTO cl_minecarts (entity_uuid, owner_uuid) VALUES (?, ?) "
+                                    + "ON DUPLICATE KEY UPDATE owner_uuid = VALUES(owner_uuid)")) {
                 ps.setString(1, entityId.toString());
                 ps.setString(2, owner.toString());
                 ps.executeUpdate();
@@ -351,7 +391,8 @@ public final class MariaDbStorage implements StorageBackend {
      * YAML からの移行を同期・1 トランザクションで実行する。
      * 全件の保存に成功した場合のみ完了となる。失敗時は SQLException を送出。
      */
-    public void importAll(Map<ChestKey, ChestData> chests, Map<String, UUID> hoppers, Map<UUID, UUID> minecarts) throws SQLException {
+    public void importAll(Map<ChestKey, ChestData> chests, Map<String, UUID> hoppers, Map<UUID, UUID> minecarts)
+            throws SQLException {
         try (Connection c = connect()) {
             c.setAutoCommit(false);
             try {
