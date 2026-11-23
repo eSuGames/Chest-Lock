@@ -6,6 +6,7 @@ import dev.chestlock.ChestKey;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * チェスト設定の永続化バックエンド（data.yml / MariaDB）。
@@ -30,19 +31,19 @@ public interface StorageBackend {
     LoadedData load();
 
     /** チェスト 1 件を保存（UPSERT）。 */
-    void saveChest(ChestKey key, ChestData data);
+    CompletableFuture<Void> saveChestAsync(ChestKey key, ChestData data);
 
     /** チェスト 1 件を削除。 */
-    void deleteChest(ChestKey key);
+    CompletableFuture<Void> deleteChestAsync(ChestKey key);
 
     /** ホッパー設置者を保存（UPSERT）。 */
-    void saveHopper(String key, UUID owner);
+    CompletableFuture<Void> saveHopperAsync(String key, UUID owner);
 
     /** ホッパー設置者を削除。 */
-    void deleteHopper(String key);
+    CompletableFuture<Void> deleteHopperAsync(String key);
 
     /** ホッパー付きトロッコの設置者を保存（UPSERT）。 */
-    void saveMinecart(UUID entityId, UUID owner);
+    CompletableFuture<Void> saveMinecartAsync(UUID entityId, UUID owner);
 
     /** 全データを書き出す（YAML は全体再生成、DB は不要）。 */
     void flush(LoadedData data);

@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -109,25 +110,30 @@ public final class YamlStorage implements StorageBackend {
     }
 
     // ---- 行単位 API：data.yml は全体を書き直す方式のため、ここでは何もしない ----
-
+ 
     @Override
-    public void saveChest(ChestKey key, ChestData data) {
+    public CompletableFuture<Void> saveChestAsync(ChestKey key, ChestData data) {
+        return CompletableFuture.completedFuture(null);
+    }
+ 
+    @Override
+    public CompletableFuture<Void> deleteChestAsync(ChestKey key) {
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override
-    public void deleteChest(ChestKey key) {
+    public CompletableFuture<Void> saveHopperAsync(String key, UUID owner) {
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override
-    public void saveHopper(String key, UUID owner) {
+    public CompletableFuture<Void> deleteHopperAsync(String key) {
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override
-    public void deleteHopper(String key) {
-    }
-
-    @Override
-    public void saveMinecart(UUID entityId, UUID owner) {
+    public CompletableFuture<Void> saveMinecartAsync(UUID entityId, UUID owner) {
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override

@@ -73,6 +73,8 @@ messages:
   confirm-cancel: 'キャンセルしました。'
   # 名前入力画面のプレースホルダー
   input-placeholder: 'ユーザー名を入力'
+  # when saving lock data made error
+  save-lock-error: 'ロック情報の保存に失敗しました。何回も発生する場合は管理者にお知らせください。'
 
   # --- 設定拒否時のメッセージ ---
   # 所有者以外がラージチェストへの増結を試みた

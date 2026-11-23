@@ -27,6 +27,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.logging.Level;
 
 /**
  * チェストの設定・解除・破壊制限・増結を扱うリスナー。
@@ -80,7 +81,13 @@ public final class ChestLockListener implements Listener {
         ChestData data = plugin.getStore().get(block).orElse(null);
         if (data != null && data.backfillSharedUuid(player)) {
             // UUID が判明した共有ユーザー情報を保存する
-            plugin.getStore().update(block, data);
+            plugin.getStore().update(block, data).whenComplete((_, resErr) -> {
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (resErr != null) {
+                        plugin.getLogger().log(Level.SEVERE, "共有ユーザー情報の保存に失敗しました", resErr);
+                    }
+                });
+            });
         }
         if (player.isSneaking() && ItemUtil.isIronChain(material)) {
             // 鉄チェーン + シフト右クリック：公共用チェストに設定
@@ -91,9 +98,17 @@ public final class ChestLockListener implements Listener {
                 return;
             }
             consumeHeldItem(player);
-            plugin.getStore().register(block, ChestData.publicChest(player));
-            plugin.getMessages().send(player, "public-set");
-            plugin.getSounds().play("public", player, block.getLocation());
+            plugin.getStore().register(block, ChestData.publicChest(player)).whenComplete((_, resErr) -> {
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (resErr == null) {
+                        plugin.getMessages().send(player, "public-set");
+                        plugin.getSounds().play("public", player, block.getLocation());
+                    } else {
+                        plugin.getLogger().log(Level.SEVERE, "チェストの保存に失敗しました", resErr);
+                        plugin.getMessages().send(player, "save-lock-error");
+                    }
+                });
+            });
             return;
         }
 
@@ -106,9 +121,17 @@ public final class ChestLockListener implements Listener {
                 return;
             }
             consumeHeldItem(player);
-            plugin.getStore().register(block, ChestData.privateChest(player));
-            plugin.getMessages().send(player, "lock-set");
-            plugin.getSounds().play("lock", player, block.getLocation());
+            plugin.getStore().register(block, ChestData.privateChest(player)).whenComplete((_, resErr) -> {
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (resErr == null) {
+                        plugin.getMessages().send(player, "lock-set");
+                        plugin.getSounds().play("lock", player, block.getLocation());
+                    } else {
+                        plugin.getLogger().log(Level.SEVERE, "チェストの保存に失敗しました", resErr);
+                        plugin.getMessages().send(player, "save-lock-error");
+                    }
+                });
+            });
             return;
         }
 
@@ -360,11 +383,11 @@ public final class ChestLockListener implements Listener {
 
     /** 増結合の相手になる隣接チェスト。実際に結合していない場合は null。 */
     private Block mergedNeighbor(Block block, Chest newChest) {
-        for (Block neighbor : new Block[]{
+        for (Block neighbor : new Block[] {
                 block.getRelative(org.bukkit.block.BlockFace.NORTH),
                 block.getRelative(org.bukkit.block.BlockFace.SOUTH),
                 block.getRelative(org.bukkit.block.BlockFace.EAST),
-                block.getRelative(org.bukkit.block.BlockFace.WEST)}) {
+                block.getRelative(org.bukkit.block.BlockFace.WEST) }) {
             if (neighbor.getType() != block.getType()) {
                 continue;
             }

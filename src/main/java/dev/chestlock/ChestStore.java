@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * チェスト設定の永続化。保存先は config の storage.type で data.yml / MariaDB を切り替えられる。
@@ -127,33 +128,47 @@ public final class ChestStore {
     }
 
     /** チェストを設定する。ラージチェストの場合は両半分に登録する。 */
-    public void register(Block block, ChestData data) {
-        update(block, data);
+    public CompletableFuture<Void> register(Block block, ChestData data) {
+        return update(block, data);
     }
 
     /**
      * 設定を更新して保存する。ラージチェストの場合は両半分へ同じ内容を書き込み、
      * 共有設定などの不整合を防ぐ。
      */
-    public void update(Block block, ChestData data) {
+    public CompletableFuture<Void> update(Block block, ChestData data) {
         ChestKey key = ChestKey.of(block);
-        chests.put(key, data.copy());
-        backend.saveChest(key, data);
+        ChestData snapshot = data.copy();
+        chests.put(key, snapshot);
+
         Block partner = ItemUtil.findPartnerHalf(block);
-        if (partner != null) {
-            ChestKey partnerKey = ChestKey.of(partner);
-            chests.put(partnerKey, data.copy());
-            backend.saveChest(partnerKey, data);
+        ChestKey partnerKey = partner == null ? null : ChestKey.of(partner);
+
+        if (partnerKey != null) {
+            chests.put(partnerKey, snapshot.copy());
         }
+
+        CompletableFuture<Void> retVal = null;
+
+        CompletableFuture<Void> mainResult = backend.saveChestAsync(key, snapshot);
+        if (partnerKey != null) {
+            CompletableFuture<Void> partnerResult = backend.saveChestAsync(partnerKey, snapshot);
+
+            retVal = CompletableFuture.allOf(mainResult, partnerResult);
+        } else {
+            retVal = mainResult;
+        }
+
         // 変更を即座に永続化する（クラッシュ時のデータ消失防止）
         save();
+        return retVal;
     }
 
     /** 片方の半分だけに設定を追加する（増結時の引き継ぎ用）。 */
     public void set(Block block, ChestData data) {
         ChestKey key = ChestKey.of(block);
         chests.put(key, data.copy());
-        backend.saveChest(key, data);
+        backend.saveChestAsync(key, data);
         save();
     }
 
@@ -183,7 +198,7 @@ public final class ChestStore {
 
     private void deleteKey(ChestKey key) {
         chests.remove(key);
-        backend.deleteChest(key);
+        backend.deleteChestAsync(key);
         save();
     }
 
@@ -196,7 +211,7 @@ public final class ChestStore {
     public void setHopperOwner(Block block, UUID owner) {
         String key = ChestKey.of(block).toKeyString();
         hopperOwners.put(key, owner);
-        backend.saveHopper(key, owner);
+        backend.saveHopperAsync(key, owner);
         save();
     }
 
@@ -211,14 +226,14 @@ public final class ChestStore {
     public void removeHopper(Block block) {
         String key = ChestKey.of(block).toKeyString();
         if (hopperOwners.remove(key) != null) {
-            backend.deleteHopper(key);
+            backend.deleteHopperAsync(key);
             save();
         }
     }
 
     public void setMinecartOwner(UUID entityId, UUID owner) {
         minecartOwners.put(entityId, owner);
-        backend.saveMinecart(entityId, owner);
+        backend.saveMinecartAsync(entityId, owner);
         save();
     }
 

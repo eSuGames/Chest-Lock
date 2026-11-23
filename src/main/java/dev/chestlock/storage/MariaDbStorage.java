@@ -12,8 +12,10 @@ import java.sql.Statement;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -57,14 +59,43 @@ public final class MariaDbStorage implements StorageBackend {
     }
 
     /** 書き込み処理を非同期で実行する。 */
-    private void execute(String what, SqlTask task) {
-        writer.execute(() -> {
-            try {
-                task.run();
-            } catch (SQLException e) {
-                logger.log(Level.SEVERE, "MariaDB への" + what + "に失敗しました", e);
-            }
-        });
+    private CompletableFuture<Void> executeAsync(String what, SqlTask task) {
+        CompletableFuture<Void> result = new CompletableFuture<>();
+
+        try {
+            writer.execute(() -> {
+                for (int attempt = 1; attempt <= 3; attempt++) {
+                    try {
+                        task.run();
+
+                        result.complete(null);
+                        return;
+                    } catch (SQLException se) {
+                        if (attempt == 3) {
+                            logger.log(Level.SEVERE, "MariaDB への" + what + "に失敗しました", se);
+
+                            result.completeExceptionally(se);
+                            return;
+                        }
+
+                        logger.log(Level.WARNING, "MariaDBへの" + what + "を再試行します: " + attempt, se);
+                        
+                        try {
+                            Thread.sleep(250L * attempt);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+
+                            result.completeExceptionally(ie);
+                            return;
+                        }
+                    }
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            result.completeExceptionally(e);
+        }
+
+        return result;
     }
 
     /** テーブルを作成する。接続できない場合は SQLException を送出。 */
@@ -163,8 +194,10 @@ public final class MariaDbStorage implements StorageBackend {
     }
 
     @Override
-    public void saveChest(ChestKey key, ChestData data) {
-        execute("チェスト設定の保存", () -> saveChestSync(key, data));
+    public CompletableFuture<Void> saveChestAsync(ChestKey key, ChestData data) {
+        ChestData snapshot = data.copy();
+
+        return executeAsync("チェスト設定の保存", () -> saveChestSync(key, snapshot));
     }
 
     /** チェスト本体と共有情報を 1 つのトランザクションで保存する。 */
@@ -214,8 +247,8 @@ public final class MariaDbStorage implements StorageBackend {
     }
 
     @Override
-    public void deleteChest(ChestKey key) {
-        execute("チェスト設定の削除", () -> deleteChestSync(key));
+    public CompletableFuture<Void> deleteChestAsync(ChestKey key) {
+        return executeAsync("チェスト設定の削除", () -> deleteChestSync(key));
     }
 
     private void deleteChestSync(ChestKey key) throws SQLException {
@@ -247,12 +280,14 @@ public final class MariaDbStorage implements StorageBackend {
     }
 
     @Override
-    public void saveHopper(String key, UUID owner) {
+    public CompletableFuture<Void> saveHopperAsync(String key, UUID owner) {
         ChestKey chestKey = ChestKey.fromKeyString(key);
+
         if (chestKey == null) {
-            return;
+            return CompletableFuture.completedFuture(null);
         }
-        execute("保存", () -> {
+
+        return executeAsync("保存", () -> {
             try (Connection c = connect();
                  PreparedStatement ps = c.prepareStatement(
                          "INSERT INTO cl_hoppers (world, x, y, z, owner_uuid) VALUES (?, ?, ?, ?, ?) "
@@ -268,12 +303,14 @@ public final class MariaDbStorage implements StorageBackend {
     }
 
     @Override
-    public void deleteHopper(String key) {
+    public CompletableFuture<Void> deleteHopperAsync(String key) {
         ChestKey chestKey = ChestKey.fromKeyString(key);
+
         if (chestKey == null) {
-            return;
+            return CompletableFuture.completedFuture(null);
         }
-        execute("削除", () -> {
+
+        return executeAsync("削除", () -> {
             try (Connection c = connect();
                  PreparedStatement ps = c.prepareStatement(
                          "DELETE FROM cl_hoppers WHERE world = ? AND x = ? AND y = ? AND z = ?")) {
@@ -287,8 +324,8 @@ public final class MariaDbStorage implements StorageBackend {
     }
 
     @Override
-    public void saveMinecart(UUID entityId, UUID owner) {
-        execute("保存", () -> {
+    public CompletableFuture<Void> saveMinecartAsync(UUID entityId, UUID owner) {
+        return executeAsync("保存", () -> {
             try (Connection c = connect();
                  PreparedStatement ps = c.prepareStatement(
                          "INSERT INTO cl_minecarts (entity_uuid, owner_uuid) VALUES (?, ?) "
