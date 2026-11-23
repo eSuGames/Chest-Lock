@@ -3,9 +3,9 @@ package dev.chestlock.storage;
 import dev.chestlock.ChestData;
 import dev.chestlock.ChestKey;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * チェスト設定の永続化バックエンド（data.yml / MariaDB）。
@@ -14,8 +14,8 @@ public interface StorageBackend {
 
     /** 読み込み結果。 */
     record LoadedData(Map<ChestKey, ChestData> chests, Map<String, UUID> hoppers, Map<UUID, UUID> minecarts) {
-        LoadedData copy() {
-            Map<ChestKey, ChestData> chestsCopy = new LinkedHashMap<>();
+        LoadedData copy(Supplier<Map<ChestKey, ChestData>> initiate_map) {
+            Map<ChestKey, ChestData> chestsCopy = initiate_map.get();
 
             for (Map.Entry<ChestKey, ChestData> entry : this.chests().entrySet()) {
                 chestsCopy.put(entry.getKey(), entry.getValue().copy());
