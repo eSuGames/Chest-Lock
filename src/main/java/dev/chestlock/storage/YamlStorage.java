@@ -143,12 +143,12 @@ public final class YamlStorage implements StorageBackend {
         pending = snapshot;
         if (scheduled.compareAndSet(false, true)) {
             writer.execute(() -> {
+                scheduled.set(false);
+
                 LoadedData latest = pending;
                 if (latest != null) {
                     write(latest);
                 }
-
-                scheduled.set(false);
             });
         }
     }
