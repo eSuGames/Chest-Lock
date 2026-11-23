@@ -3,6 +3,7 @@ package dev.chestlock.storage;
 import dev.chestlock.ChestData;
 import dev.chestlock.ChestKey;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -13,6 +14,15 @@ public interface StorageBackend {
 
     /** 読み込み結果。 */
     record LoadedData(Map<ChestKey, ChestData> chests, Map<String, UUID> hoppers, Map<UUID, UUID> minecarts) {
+        LoadedData copy() {
+            Map<ChestKey, ChestData> chestsCopy = new LinkedHashMap<>();
+
+            for (Map.Entry<ChestKey, ChestData> entry : this.chests().entrySet()) {
+                chestsCopy.put(entry.getKey(), entry.getValue().copy());
+            }
+
+            return new LoadedData(chestsCopy, this.hoppers(), this.minecarts());
+        }
     }
 
     /** 全データを読み込む。 */
@@ -35,4 +45,5 @@ public interface StorageBackend {
 
     /** 全データを書き出す（YAML は全体再生成、DB は不要）。 */
     void flush(LoadedData data);
+
 }

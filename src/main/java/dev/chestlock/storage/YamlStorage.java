@@ -132,14 +132,17 @@ public final class YamlStorage implements StorageBackend {
 
     @Override
     public void flush(LoadedData data) {
-        pending = data;
+        LoadedData snapshot = data.copy();
+
+        pending = snapshot;
         if (scheduled.compareAndSet(false, true)) {
             writer.execute(() -> {
-                scheduled.set(false);
-                LoadedData snapshot = pending;
-                if (snapshot != null) {
-                    write(snapshot);
+                LoadedData latest = pending;
+                if (latest != null) {
+                    write(latest);
                 }
+
+                scheduled.set(false);
             });
         }
     }
