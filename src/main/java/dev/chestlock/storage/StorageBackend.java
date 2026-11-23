@@ -21,7 +21,8 @@ public interface StorageBackend {
                 chestsCopy.put(entry.getKey(), entry.getValue().copy());
             }
 
-            return new LoadedData(chestsCopy, this.hoppers(), this.minecarts());
+            return new LoadedData(chestsCopy, new LinkedHashMap<>(this.hoppers()),
+                    new LinkedHashMap<>(this.minecarts()));
         }
     }
 
