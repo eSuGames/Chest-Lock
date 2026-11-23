@@ -78,8 +78,8 @@ public final class MariaDbStorage implements StorageBackend {
                             return;
                         }
 
-                        logger.log(Level.WARNING, "MariaDBへの" + what + "を再試行します: " + attempt, se);
-                        
+                        logger.log(Level.WARNING, "MariaDB への" + what + "を再試行します: " + attempt, se);
+
                         try {
                             Thread.sleep(250L * attempt);
                         } catch (InterruptedException ie) {
@@ -88,6 +88,11 @@ public final class MariaDbStorage implements StorageBackend {
                             result.completeExceptionally(ie);
                             return;
                         }
+                    } catch (RuntimeException re) {
+                        logger.log(Level.SEVERE, "MariaDB への" + what + "で予期しないエラーが発生しました", re);
+
+                        result.completeExceptionally(re);
+                        return;
                     }
                 }
             });
